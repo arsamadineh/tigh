@@ -4,13 +4,13 @@ A lightweight, composable TypeScript API engine with built-in routing, caching, 
 
 ## Features
 
-- **Routing** — Fast trie-based routing with path parameters and wildcards
-- **Caching** — LRU cache with TTL support and pattern-based invalidation
-- **Rate Limiting** — Token bucket, sliding window, and fixed window strategies
-- **Circuit Breaker** — Automatic failure detection and recovery
-- **Middleware** — Chainable middleware with CORS and timing out of the box
-- **Metrics** — Built-in request tracking, latency percentiles, and performance analytics
-- **Next.js Adapter** — Drop-in integration for Next.js API routes
+- Routing — Fast trie-based routing with path parameters and wildcards
+- Caching — LRU cache with TTL support and pattern-based invalidation
+- Rate Limiting — Token bucket, sliding window, and fixed window strategies
+- Circuit Breaker — Automatic failure detection and recovery
+- Middleware — Chainable middleware with CORS and timing out of the box
+- Metrics — Built-in request tracking, latency percentiles, and performance analytics
+- Next.js Adapter — Drop-in integration for Next.js API routes
 
 ## Installation
 
@@ -47,6 +47,22 @@ const response = await engine.handle('GET', '/quotes/42', {
 });
 ```
 
+## Documentation
+
+### English
+
+- README.md (this file)
+- USAGE_GUIDE.md - Detailed usage guide with examples
+- CONTRIBUTING.md - How to contribute
+- CODE_OF_CONDUCT.md - Community guidelines
+
+### Persian (فارسی)
+
+- README_FA.md - دستورالعمل کامل به فارسی
+- USAGE_GUIDE_FA.md - راهنمای استفاده تفصیلی
+- CONTRIBUTING_FA.md - چگونگی سهم‌گذاری
+- CODE_OF_CONDUCT_FA.md - رهنمودهای جامعه
+
 ## API Reference
 
 ### Creating an Engine
@@ -55,7 +71,7 @@ const response = await engine.handle('GET', '/quotes/42', {
 const engine = new Tigh(config?: Partial<EngineConfig>);
 ```
 
-**Configuration Options:**
+Configuration Options:
 
 ```typescript
 interface EngineConfig {
@@ -67,7 +83,7 @@ interface EngineConfig {
   rateLimit: {
     windowMs: number;          // Default: 60000ms
     maxRequests: number;       // Default: 100
-    strategy: 'token-bucket' | 'sliding-window' | 'fixed-window'; // Default: 'token-bucket'
+    strategy: 'token-bucket' | 'sliding-window' | 'fixed-window';
   };
   circuitBreaker: {
     failureThreshold: number;  // Default: 5
@@ -81,16 +97,16 @@ interface EngineConfig {
   enableCircuitBreaker: boolean; // Default: true
   cors: {
     origin: string | string[]; // Default: '*'
-    methods: string[];         // Default: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
-    headers: string[];         // Default: ['Content-Type', 'Authorization', 'X-Request-Id']
-    maxAge: number;            // Default: 86400
+    methods: string[];
+    headers: string[];
+    maxAge: number;
   };
 }
 ```
 
 ### Defining Routes
 
-**Shorthand Methods:**
+Shorthand methods:
 
 ```typescript
 engine.get(path, handler, options?);
@@ -99,50 +115,47 @@ engine.put(path, handler, options?);
 engine.delete(path, handler, options?);
 ```
 
-**Generic Route Method:**
+Example:
 
 ```typescript
-engine.route({
-  method: 'GET',
-  path: '/users/:id',
-  handler: async (req) => ({ ... }),
-  middlewares: [customMiddleware],
-  cache: { ttl: 120000 },
-  rateLimit: { maxRequests: 50 },
+engine.get('/api/quotes', async (req) => {
+  return {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+    body: { quotes: [] },
+  };
+});
+
+engine.post('/api/quotes', async (req) => {
+  return {
+    status: 201,
+    headers: { 'Content-Type': 'application/json' },
+    body: { id: 1, ...req.body },
+  };
 });
 ```
 
-### Route Handler
+### Path Parameters
 
 ```typescript
-type RouteHandler = (req: Request) => Promise<Response> | Response;
+// Named parameters
+engine.get('/users/:id', async (req) => {
+  return {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+    body: { id: req.params.id },
+  };
+});
 
-interface Request {
-  method: HttpMethod;
-  path: string;
-  headers: Record<string, string>;
-  query: Record<string, string>;
-  params: RouteParams;
-  body?: unknown;
-  ip?: string;
-  timestamp: number;
-}
-
-interface Response {
-  status: number;
-  headers: Record<string, string>;
-  body: unknown;
-}
-```
-
-### Path Parameters and Wildcards
-
-```typescript
-// Named parameters: /users/:id -> params.id = "123"
-engine.get('/users/:id', handler);
-
-// Wildcard routes: /static/* -> params['*'] = "css/style.css"
-engine.get('/static/*', handler);
+// Wildcard routes
+engine.get('/static/*', async (req) => {
+  const filePath = req.params['*'];
+  return {
+    status: 200,
+    headers: { 'Content-Type': 'text/css' },
+    body: '/* CSS content */',
+  };
+});
 ```
 
 ### Caching
@@ -151,28 +164,32 @@ Enable caching per route:
 
 ```typescript
 engine.get(
-  '/quotes/random',
-  async (req) => ({ status: 200, headers: {}, body: { quote: '...' } }),
+  '/api/config',
+  async (req) => {
+    return {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: { config: 'data' },
+    };
+  },
   {
     cache: {
-      ttl: 300000, // 5 minutes
-      key: (req) => `quote:random`, // Custom cache key
+      ttl: 3600000, // 1 hour
+      key: (req) => 'config',
     },
   }
 );
 ```
 
-The response includes `X-Cache: HIT` or `X-Cache: MISS` headers.
-
-**Invalidate cache patterns:**
+Invalidate cache patterns:
 
 ```typescript
-engine.invalidateCache('quote:*'); // Invalidates all keys matching 'quote:*'
+engine.invalidateCache('config:*');
 ```
 
 ### Rate Limiting
 
-Rate limiting is applied globally by default. Customize per request IP:
+Configure rate limiting:
 
 ```typescript
 const engine = new Tigh({
@@ -185,7 +202,7 @@ const engine = new Tigh({
 });
 ```
 
-Rate-limited responses return `429 Too Many Requests` with headers:
+Rate-limited responses return 429 with headers:
 
 ```
 X-RateLimit-Limit: 100
@@ -207,11 +224,15 @@ engine.use(async (req, next) => {
 });
 ```
 
-**Built-in Middleware:**
+Built-in middleware:
 
-- `corsMiddleware` — Handle CORS preflight and headers
-- `timingMiddleware` — Add `X-Response-Time` and `X-Request-Id` headers
-- `compressMiddleware` — Gzip compression for responses > 1KB
+```typescript
+import { corsMiddleware, timingMiddleware, compressMiddleware } from 'tigh';
+
+engine.use(corsMiddleware({ origin: '*' }));
+engine.use(timingMiddleware());
+engine.use(compressMiddleware());
+```
 
 ### Circuit Breaker
 
@@ -227,14 +248,7 @@ const engine = new Tigh({
 });
 ```
 
-Responses when circuit is open return `503 Service Unavailable`:
-
-```json
-{
-  "error": "Service Unavailable",
-  "message": "Circuit breaker is open. Please retry later."
-}
-```
+States: Closed (normal) -> Open (failing) -> Half-Open (recovery)
 
 ### Metrics
 
@@ -246,7 +260,7 @@ const metrics = engine.flushMetrics();
 console.log(metrics.requests.total);        // Total requests
 console.log(metrics.latency.p99);           // 99th percentile latency
 console.log(metrics.cache.hitRate);         // Cache hit rate
-console.log(metrics.circuitBreaker.state);  // 'open' | 'closed' | 'half-open'
+console.log(metrics.circuitBreaker.state);  // Circuit state
 ```
 
 ## Next.js Integration
@@ -273,6 +287,50 @@ engine.get('/api/quotes/:id', async (req) => {
 export const GET = createNextHandler(engine);
 ```
 
+## Project Structure
+
+```
+tigh/
+├── src/
+│   ├── engine.ts                 Main engine class
+│   ├── types.ts                  TypeScript definitions
+│   ├── router.ts                 Trie-based routing
+│   ├── cache.ts                  LRU cache implementation
+│   ├── rate-limiter.ts           Rate limiting (3 strategies)
+│   ├── circuit-breaker.ts        Automatic failure recovery
+│   ├── middleware.ts             Middleware system
+│   ├── metrics.ts                Performance metrics
+│   ├── adapter-next.ts           Next.js adapter
+│   └── index.ts                  Main exports
+├── dist/                         Compiled output
+├── package.json                  Dependencies
+├── tsconfig.json                 TypeScript config
+├── LICENSE                       MIT License
+└── README.md                     This file
+```
+
+## Best Practices
+
+1. Cache strategically - focus on read-heavy, infrequently-changing data
+2. Monitor metrics - set up alerts for anomalies
+3. Test circuit breaker - simulate failures to verify recovery
+4. Clean up resources - call engine.destroy() on shutdown
+5. Use appropriate TTLs - balance freshness with performance
+
 ## License
 
 MIT
+
+## Contributing
+
+Contributions welcome! Please see CONTRIBUTING.md for guidelines.
+
+## Support
+
+For issues and questions:
+- GitHub Issues: https://github.com/arsamadineh/tigh/issues
+- Discussions: https://github.com/arsamadineh/tigh/discussions
+
+---
+
+Built with care for the Persian-speaking community.
