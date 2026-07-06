@@ -1,0 +1,27 @@
+{
+  "name": "tigh",
+  "version": "0.1.0",
+  "description": "A lightweight, composable TypeScript API engine with routing, caching, rate limiting, circuit breaking, and metrics",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "api",
+    "engine",
+    "routing",
+    "cache",
+    "rate-limit",
+    "circuit-breaker",
+    "middleware",
+    "metrics"
+  ],
+  "author": "Arsam Adineh",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
