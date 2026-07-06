@@ -12,6 +12,17 @@ A lightweight, composable TypeScript API engine with built-in routing, caching, 
 - Metrics — Built-in request tracking, latency percentiles, and performance analytics
 - Next.js Adapter — Drop-in integration for Next.js API routes
 
+## Table of Contents
+
+1. [Installation](#installation)
+2. [Quick Start](#quick-start)
+3. [API Reference](#api-reference)
+4. [Examples](#examples)
+5. [Project Structure](#project-structure)
+6. [Best Practices](#best-practices)
+7. [Documentation in Other Languages](#documentation-in-other-languages)
+8. [License](#license)
+
 ## Installation
 
 ```bash
@@ -45,23 +56,9 @@ const response = await engine.handle('GET', '/quotes/42', {
   params: {},
   timestamp: Date.now(),
 });
+
+console.log(response);
 ```
-
-## Documentation
-
-### English
-
-- README.md (this file)
-- USAGE_GUIDE.md - Detailed usage guide with examples
-- CONTRIBUTING.md - How to contribute
-- CODE_OF_CONDUCT.md - Community guidelines
-
-### Persian (فارسی)
-
-- README_FA.md - دستورالعمل کامل به فارسی
-- USAGE_GUIDE_FA.md - راهنمای استفاده تفصیلی
-- CONTRIBUTING_FA.md - چگونگی سهم‌گذاری
-- CODE_OF_CONDUCT_FA.md - رهنمودهای جامعه
 
 ## API Reference
 
@@ -263,9 +260,88 @@ console.log(metrics.cache.hitRate);         // Cache hit rate
 console.log(metrics.circuitBreaker.state);  // Circuit state
 ```
 
-## Next.js Integration
+## Examples
 
-Use the adapter to integrate with Next.js API routes:
+### Basic API Server
+
+```typescript
+import { Tigh } from 'tigh';
+
+const engine = new Tigh({
+  cache: { maxSize: 5000, defaultTTL: 300000 },
+  rateLimit: { windowMs: 60000, maxRequests: 1000 },
+});
+
+engine.get('/api/quotes', async (req) => {
+  return {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+    body: { quotes: [] },
+  };
+}, { cache: { ttl: 300000 } });
+
+engine.get('/api/quotes/:id', async (req) => {
+  return {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+    body: { id: req.params.id, text: 'Quote text...' },
+  };
+}, {
+  cache: {
+    ttl: 600000,
+    key: (req) => `quote:${req.params.id}`,
+  },
+});
+
+engine.post('/api/quotes', async (req) => {
+  const { text, author } = req.body as { text: string; author: string };
+  engine.invalidateCache('quote:*');
+  
+  return {
+    status: 201,
+    headers: { 'Content-Type': 'application/json' },
+    body: {
+      id: Date.now(),
+      text,
+      author,
+      createdAt: new Date().toISOString(),
+    },
+  };
+});
+```
+
+### With Middleware
+
+```typescript
+import { Tigh, corsMiddleware, timingMiddleware } from 'tigh';
+
+const engine = new Tigh();
+
+engine.use(corsMiddleware({ origin: '*' }));
+engine.use(timingMiddleware());
+
+engine.use(async (req, next) => {
+  const token = req.headers['authorization'];
+  if (!token) {
+    return {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+      body: { error: 'Unauthorized' },
+    };
+  }
+  return next();
+});
+
+engine.get('/api/protected', async (req) => {
+  return {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+    body: { message: 'Protected resource' },
+  };
+});
+```
+
+### Next.js Integration
 
 ```typescript
 // app/api/quotes/[id]/route.ts
@@ -301,6 +377,7 @@ tigh/
 │   ├── middleware.ts             Middleware system
 │   ├── metrics.ts                Performance metrics
 │   ├── adapter-next.ts           Next.js adapter
+│   ├── instance.ts               Engine instance helpers
 │   └── index.ts                  Main exports
 ├── dist/                         Compiled output
 ├── package.json                  Dependencies
@@ -316,21 +393,59 @@ tigh/
 3. Test circuit breaker - simulate failures to verify recovery
 4. Clean up resources - call engine.destroy() on shutdown
 5. Use appropriate TTLs - balance freshness with performance
+6. Validate input - always validate request data before processing
+7. Use HTTPS in production - never transmit sensitive data over HTTP
+8. Implement proper authentication - use middleware for auth checks
 
-## License
+## Documentation in Other Languages
 
-MIT
+### فارسی (Persian)
 
-## Contributing
+Tigh provides complete documentation in Persian for Persian-speaking developers:
 
-Contributions welcome! Please see CONTRIBUTING.md for guidelines.
+- **README_FA.md** - Complete Persian documentation with examples
+- **USAGE_GUIDE_FA.md** - Detailed usage guide with Persian examples
+- **CONTRIBUTING_FA.md** - Persian contribution guidelines
+- **CODE_OF_CONDUCT_FA.md** - Persian community guidelines
+- **CHANGELOG_FA.md** - Persian release notes
+- **SETUP.md** - Bilingual setup and deployment guide
+
+#### فارسی مختصر (Quick Persian Overview)
+
+تیغ یک موتور API سبک‌وزن و قابل ترکیب برای TypeScript است که شامل:
+
+- مسیریابی تریه‌ای سریع
+- کش LRU با TTL
+- محدودیت نرخ (3 استراتژی)
+- قطع مدار خودکار
+- سیستم middleware
+- معیارهای جامع
+- انطباق‌گر Next.js
+
+For full Persian documentation, see README_FA.md
+
+## Additional Resources
+
+- **CONTRIBUTING.md** - How to contribute to Tigh
+- **CODE_OF_CONDUCT.md** - Community guidelines
+- **SECURITY.md** - Security best practices
+- **CHANGELOG.md** - Release notes and version history
+- **SETUP.md** - Setup and deployment guide
 
 ## Support
 
 For issues and questions:
+
 - GitHub Issues: https://github.com/arsamadineh/tigh/issues
 - Discussions: https://github.com/arsamadineh/tigh/discussions
+- Security Issues: Please report privately
+
+## License
+
+MIT License - see LICENSE file for details
+
+Copyright (c) 2026 Arsam Adineh
 
 ---
 
-Built with care for the Persian-speaking community.
+Built with care for developers worldwide. Full documentation available in English and Persian.
