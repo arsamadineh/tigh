@@ -14,15 +14,15 @@
 - Full TypeScript support with strict type checking
 - Extensive Persian and English documentation
 
-### Features
-- **Routing**: Fast trie-based routing supporting named parameters and wildcards
-- **Caching**: LRU cache with configurable TTL and memory limits
-- **Rate Limiting**: Multiple strategies for different use cases
-- **Circuit Breaker**: Automatic failure detection with half-open recovery state
-- **Middleware**: Custom middleware support with built-in utilities
-- **Metrics**: Request tracking, latency percentiles, cache stats, rate limit stats
-- **Next.js Ready**: Drop-in adapter for Next.js API routes
-- **Performance**: Optimized for high-throughput API services
+### Core Features
+- Routing: Fast trie-based routing supporting named parameters and wildcards
+- Caching: LRU cache with configurable TTL and memory limits
+- Rate Limiting: Multiple strategies for different use cases
+- Circuit Breaker: Automatic failure detection with half-open recovery state
+- Middleware: Custom middleware support with built-in utilities
+- Metrics: Request tracking, latency percentiles, cache stats, rate limit stats
+- Next.js Ready: Drop-in adapter for Next.js API routes
+- Performance: Optimized for high-throughput API services
 
 ### Documentation
 - Complete README in English and Persian
