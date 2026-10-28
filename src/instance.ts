@@ -1,6 +1,7 @@
+import { TighEngine } from './server';
 import { Tigh } from './engine';
 
-export const engine = new Tigh({
+export const engine = new TighEngine({
   enableMetrics: true,
   enableCache: true,
   enableRateLimit: true,
@@ -13,7 +14,7 @@ export const engine = new Tigh({
   rateLimit: {
     windowMs: 60000,
     maxRequests: 120,
-    strategy: 'token-bucket',
+    strategy: 'gcra',
   },
   circuitBreaker: {
     failureThreshold: 5,
@@ -23,8 +24,13 @@ export const engine = new Tigh({
   },
   cors: {
     origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'],
     headers: ['Content-Type', 'Authorization', 'X-Request-Id', 'X-Api-Key'],
     maxAge: 86400,
   },
 });
+
+export const legacyEngine = new Tigh();
+
+export { createNextHandler } from './adapters/next';
+export default engine;

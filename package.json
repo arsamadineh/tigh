@@ -1,27 +1,106 @@
 {
   "name": "tigh",
-  "version": "0.1.0",
-  "description": "A lightweight, composable TypeScript API engine with routing, caching, rate limiting, circuit breaking, and metrics",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "version": "1.0.0",
+  "description": "Ultra-fast, zero-dependency, multi-runtime TypeScript API engine featuring compiled Radix routing, S3-FIFO fragment caching, GCRA rate limiting, circuit breaker, and DDSketch telemetry",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js",
+      "default": "./dist/server.js"
+    },
+    "./router": {
+      "types": "./dist/router/index.d.ts",
+      "import": "./dist/router/index.js",
+      "default": "./dist/router/index.js"
+    },
+    "./cache": {
+      "types": "./dist/cache/index.d.ts",
+      "import": "./dist/cache/index.js",
+      "default": "./dist/cache/index.js"
+    },
+    "./rate-limiter": {
+      "types": "./dist/rate-limiter/index.d.ts",
+      "import": "./dist/rate-limiter/index.js",
+      "default": "./dist/rate-limiter/index.js"
+    },
+    "./circuit-breaker": {
+      "types": "./dist/circuit-breaker/index.d.ts",
+      "import": "./dist/circuit-breaker/index.js",
+      "default": "./dist/circuit-breaker/index.js"
+    },
+    "./telemetry": {
+      "types": "./dist/telemetry/index.d.ts",
+      "import": "./dist/telemetry/index.js",
+      "default": "./dist/telemetry/index.js"
+    },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "import": "./dist/adapters/index.js",
+      "default": "./dist/adapters/index.js"
+    },
+    "./adapters/bun": {
+      "types": "./dist/adapters/bun.d.ts",
+      "import": "./dist/adapters/bun.js",
+      "default": "./dist/adapters/bun.js"
+    },
+    "./adapters/cloudflare": {
+      "types": "./dist/adapters/cloudflare.d.ts",
+      "import": "./dist/adapters/cloudflare.js",
+      "default": "./dist/adapters/cloudflare.js"
+    },
+    "./adapters/next": {
+      "types": "./dist/adapters/next.d.ts",
+      "import": "./dist/adapters/next.js",
+      "default": "./dist/adapters/next.js"
+    },
+    "./adapters/node": {
+      "types": "./dist/adapters/node.d.ts",
+      "import": "./dist/adapters/node.js",
+      "default": "./dist/adapters/node.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "README_FA.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
-    "test": "node --test",
-    "typecheck": "tsc --noEmit"
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsc"
   },
   "keywords": [
     "api",
     "engine",
     "routing",
+    "radix-router",
     "cache",
+    "s3-fifo",
+    "tiny-lfu",
     "rate-limit",
+    "gcra",
     "circuit-breaker",
-    "middleware",
-    "metrics"
+    "ddsketch",
+    "telemetry",
+    "bun",
+    "cloudflare-workers",
+    "nextjs",
+    "node"
   ],
   "author": "Arsam Adineh",
   "license": "MIT",
   "devDependencies": {
+    "@types/node": "^26.6.5",
     "typescript": "^5.0.0"
   }
 }

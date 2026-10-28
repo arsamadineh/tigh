@@ -1,11 +1,11 @@
 import type {
   EngineConfig,
-  EngineRoute,
+  LegacyEngineRoute as EngineRoute,
   HttpMethod,
-  MiddlewareFn,
+  LegacyMiddlewareFn as MiddlewareFn,
   Request,
   Response,
-  NextFn,
+  LegacyNextFn as NextFn,
   CacheConfig,
   RateLimitConfig,
 } from './types';
@@ -15,11 +15,37 @@ import { TighMiddleware, corsMiddleware, timingMiddleware } from './middleware';
 import { TighRateLimiter } from './rate-limiter';
 import { TighCircuitBreaker, CircuitOpenError } from './circuit-breaker';
 import { TighMetrics } from './metrics';
+import {
+  TighEngine,
+  jsonBody,
+  textBody,
+  emptyBody,
+  problemResponse,
+  toWebResponse,
+  toTighRequest,
+  simpleHash,
+} from './server';
+
+export {
+  TighEngine,
+  jsonBody,
+  textBody,
+  emptyBody,
+  problemResponse,
+  toWebResponse,
+  toTighRequest,
+  simpleHash,
+};
 
 const DEFAULT_CONFIG: EngineConfig = {
   cache: { maxSize: 10000, defaultTTL: 60000, checkInterval: 30000 },
   rateLimit: { windowMs: 60000, maxRequests: 100, strategy: 'token-bucket' },
-  circuitBreaker: { failureThreshold: 5, recoveryTimeout: 30000, halfOpenMaxAttempts: 3, monitoringPeriod: 60000 },
+  circuitBreaker: {
+    failureThreshold: 5,
+    recoveryTimeout: 30000,
+    halfOpenMaxAttempts: 3,
+    monitoringPeriod: 60000,
+  },
   enableMetrics: true,
   enableCache: true,
   enableRateLimit: true,
@@ -32,6 +58,10 @@ const DEFAULT_CONFIG: EngineConfig = {
   },
 };
 
+/**
+ * Tigh v0 Engine class preserved for full backward compatibility.
+ * Enhanced with modern radix routing, S3-FIFO caching, and Web Fetch API compatibility.
+ */
 export class Tigh {
   readonly router: TighRouter;
   readonly cache: TighCache;
@@ -40,14 +70,16 @@ export class Tigh {
   readonly circuitBreaker: TighCircuitBreaker;
   readonly metrics: TighMetrics;
   private config: EngineConfig;
-  private routeCache: Map<string, { route: EngineRoute; compiledAt: number }> = new Map();
 
   constructor(config: Partial<EngineConfig> = {}) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
-    this.config.cache = { ...DEFAULT_CONFIG.cache, ...config.cache };
-    this.config.rateLimit = { ...DEFAULT_CONFIG.rateLimit, ...config.rateLimit };
-    this.config.circuitBreaker = { ...DEFAULT_CONFIG.circuitBreaker, ...config.circuitBreaker };
-    this.config.cors = { ...DEFAULT_CONFIG.cors, ...config.cors };
+    this.config = {
+      ...DEFAULT_CONFIG,
+      ...config,
+      cache: { ...DEFAULT_CONFIG.cache, ...config.cache },
+      rateLimit: { ...DEFAULT_CONFIG.rateLimit, ...config.rateLimit },
+      circuitBreaker: { ...DEFAULT_CONFIG.circuitBreaker, ...config.circuitBreaker },
+      cors: { ...DEFAULT_CONFIG.cors, ...config.cors },
+    };
 
     this.router = new TighRouter();
     this.cache = new TighCache(this.config.cache as CacheConfig);
@@ -66,54 +98,77 @@ export class Tigh {
 
   route(definition: EngineRoute): Tigh {
     const method = definition.method;
-    const middlewares = [
-      ...(definition.middlewares || []),
-    ];
+    const middlewares: MiddlewareFn[] = [];
+
+    if (this.config.enableMetrics) {
+      middlewares.push(async (req, next) => {
+        const started = performance.now();
+        try {
+          const response = await next();
+          this.metrics.recordRequest(
+            req.method,
+            definition.path,
+            response.status,
+            performance.now() - started
+          );
+          return response;
+        } catch (error) {
+          this.metrics.recordRequest(
+            req.method,
+            definition.path,
+            500,
+            performance.now() - started
+          );
+          throw error;
+        }
+      });
+    }
+
+    middlewares.push(...(definition.middlewares || []));
 
     if (this.config.enableCache && definition.cache) {
       middlewares.push(this.createCacheMiddleware(definition));
     }
 
-    const wrappedHandler: MiddlewareFn = async (req: Request, next: NextFn) => {
-      const start = performance.now();
-      try {
-        let response: Response;
+    const wrappedHandler: MiddlewareFn = async (req: Request, _next: NextFn) => {
+      let response: Response;
 
-        if (this.config.enableCircuitBreaker) {
-          try {
-            response = await this.circuitBreaker.execute(() => Promise.resolve(definition.handler(req)));
-          } catch (error) {
-            if (error instanceof CircuitOpenError) {
-              response = {
-                status: 503,
-                headers: { 'Content-Type': 'application/json', 'Retry-After': String(Math.ceil(error.retryAfter / 1000)) },
-                body: { error: 'Service Unavailable', message: 'Circuit breaker is open. Please retry later.' },
-              };
-            } else {
-              throw error;
-            }
+      if (this.config.enableCircuitBreaker) {
+        try {
+          response = await this.circuitBreaker.execute(() =>
+            Promise.resolve(definition.handler(req))
+          );
+        } catch (error) {
+          if (error instanceof CircuitOpenError) {
+            response = {
+              status: 503,
+              headers: {
+                'Content-Type': 'application/json',
+                'Retry-After': String(error.retryAfter),
+              },
+              body: {
+                error: 'Service Unavailable',
+                message: 'Circuit breaker is open. Please retry later.',
+              },
+            };
+          } else {
+            throw error;
           }
-        } else {
-          response = await definition.handler(req);
         }
-
-        const duration = performance.now() - start;
-        if (this.config.enableMetrics) {
-          this.metrics.recordRequest(req.method, definition.path, response.status, duration);
-        }
-
-        return response;
-      } catch (error) {
-        const duration = performance.now() - start;
-        if (this.config.enableMetrics) {
-          this.metrics.recordRequest(req.method, definition.path, 500, duration);
-        }
-        throw error;
+      } else {
+        response = await definition.handler(req);
       }
+
+      return response;
     };
 
     middlewares.push(wrappedHandler);
-    this.router.addRoute(method, definition.path, () => ({ status: 200, headers: {}, body: null }), middlewares);
+    this.router.addRoute(
+      method,
+      definition.path,
+      () => ({ status: 200, headers: {}, body: null }),
+      middlewares
+    );
 
     return this;
   }
@@ -134,11 +189,17 @@ export class Tigh {
     return this.route({ method: 'DELETE', path, handler, ...options });
   }
 
+  options(path: string, handler: EngineRoute['handler'], options?: Partial<EngineRoute>): Tigh {
+    return this.route({ method: 'OPTIONS', path, handler, ...options });
+  }
+
   private createCacheMiddleware(definition: EngineRoute): MiddlewareFn {
     return async (req: Request, next: NextFn) => {
       const cacheKey = definition.cache?.key
         ? definition.cache.key(req)
         : `cache:${req.method}:${req.path}:${JSON.stringify(req.query)}`;
+
+      if (req.query.random === 'true' || !cacheKey) return next();
 
       const cached = this.cache.get<Response>(cacheKey);
       if (cached) {
@@ -155,9 +216,18 @@ export class Tigh {
   }
 
   async handle(method: HttpMethod, path: string, req: Request): Promise<Response> {
+    const requestStarted = performance.now();
     if (this.config.enableRateLimit) {
       const rateResult = this.rateLimiter.check(req);
       if (!rateResult.allowed) {
+        if (this.config.enableMetrics) {
+          this.metrics.recordRequest(
+            method,
+            path,
+            429,
+            performance.now() - requestStarted
+          );
+        }
         return {
           status: 429,
           headers: {
@@ -172,18 +242,117 @@ export class Tigh {
       }
     }
 
+    if (method === 'OPTIONS') {
+      const response = await this.middleware.execute(req, async () => ({
+        status: 204,
+        headers: {},
+        body: null,
+      }));
+      if (this.config.enableMetrics) {
+        this.metrics.recordRequest(
+          method,
+          path,
+          response.status,
+          performance.now() - requestStarted
+        );
+      }
+      return response;
+    }
+
     const match = this.router.match(method, path);
     if (!match) {
-      return this.router.getNotFoundHandler()(req);
+      const response = await (this.router.getNotFoundHandler() as any)(req);
+      if (this.config.enableMetrics) {
+        this.metrics.recordRequest(
+          method,
+          path,
+          response.status,
+          performance.now() - requestStarted
+        );
+      }
+      return response;
     }
 
     req.params = match.params;
 
-    const handler = async (): Promise<Response> => {
-      return match.route.handler(req);
+    const routeMiddlewares = (match.route.middlewares || []) as MiddlewareFn[];
+    const runRouteChain: NextFn = async (): Promise<Response> => {
+      let index = 0;
+      const next: NextFn = async (): Promise<Response> => {
+        if (index < routeMiddlewares.length) {
+          const mw = routeMiddlewares[index++]!;
+          return mw(req, next);
+        }
+        return (match.route.handler as any)(req);
+      };
+      return next();
     };
 
-    return this.middleware.execute(req, handler);
+    const response = await this.middleware.execute(req, runRouteChain);
+    if (req.query.random === 'true') {
+      return {
+        ...response,
+        headers: { ...response.headers, 'Cache-Control': 'no-store' },
+      };
+    }
+    return response;
+  }
+
+  async fetch(request: globalThis.Request): Promise<globalThis.Response> {
+    const url = new URL(request.url);
+    const headers: Record<string, string> = {};
+    request.headers.forEach((v, k) => {
+      headers[k.toLowerCase()] = v;
+    });
+
+    const query: Record<string, string> = {};
+    url.searchParams.forEach((v, k) => {
+      query[k] = v;
+    });
+
+    let body: unknown = undefined;
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      try {
+        const ct = headers['content-type'] || '';
+        if (ct.includes('application/json')) {
+          body = await request.clone().json();
+        } else {
+          body = await request.clone().text();
+        }
+      } catch {
+        body = undefined;
+      }
+    }
+
+    const req: Request = {
+      method: request.method as HttpMethod,
+      path: url.pathname,
+      url: request.url,
+      headers,
+      query,
+      params: {},
+      body,
+      ip: headers['x-forwarded-for'] || headers['x-real-ip'] || 'anonymous',
+      timestamp: Date.now(),
+    };
+
+    const res = await this.handle(req.method, req.path, req);
+
+    let bodyInit: BodyInit | null = null;
+    if (res.body !== null && res.body !== undefined) {
+      if (typeof res.body === 'string') {
+        bodyInit = res.body;
+      } else if (res.body instanceof Uint8Array) {
+        bodyInit = res.body as unknown as BodyInit;
+      } else {
+        bodyInit = JSON.stringify(res.body);
+      }
+    }
+
+    return new globalThis.Response(bodyInit, {
+      status: res.status,
+      headers: res.headers,
+    });
   }
 
   use(middleware: MiddlewareFn): Tigh {
@@ -192,7 +361,6 @@ export class Tigh {
   }
 
   flushMetrics(): ReturnType<TighMetrics['snapshot']> {
-    const snapshot = this.metrics.snapshot();
     this.metrics.updateCacheStats(
       this.cache.getStats().hits,
       this.cache.getStats().misses,
@@ -205,7 +373,7 @@ export class Tigh {
       this.rateLimiter.getStats().byKey
     );
     const cbStats = this.circuitBreaker.getStats();
-    this.metrics.updateCircuitBreakerStats(cbStats.state, cbStats.failures, cbStats.successes, cbStats.totalTrips);
+    this.metrics.updateCircuitBreakerStats(cbStats);
     return this.metrics.snapshot();
   }
 
@@ -216,6 +384,7 @@ export class Tigh {
   destroy(): void {
     this.cache.destroy();
     this.rateLimiter.destroy();
-    this.routeCache.clear();
+    this.circuitBreaker.reset();
+    this.metrics.reset();
   }
 }

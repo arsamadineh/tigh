@@ -1,4 +1,7 @@
 import type { CacheConfig, CacheEntry } from './types';
+import { PrebuiltCache, withSingleFlight, GhostLedger } from './cache/prebuilt-cache';
+
+export { PrebuiltCache, withSingleFlight, GhostLedger };
 
 const DEFAULT_CONFIG: CacheConfig = {
   maxSize: 10000,
@@ -6,6 +9,10 @@ const DEFAULT_CONFIG: CacheConfig = {
   checkInterval: 30000,
 };
 
+/**
+ * TighCache: General-purpose in-memory LRU cache.
+ * Compatible with Tigh v0 interface.
+ */
 export class TighCache {
   private store: Map<string, CacheEntry> = new Map();
   private accessOrder: string[] = [];
@@ -47,7 +54,7 @@ export class TighCache {
     if (idx !== undefined) {
       this.accessOrder.splice(idx, 1);
       for (let i = idx; i < this.accessOrder.length; i++) {
-        this.accessIndex.set(this.accessOrder[i], i);
+        this.accessIndex.set(this.accessOrder[i]!, i);
       }
     }
     this.accessOrder.push(key);
@@ -106,7 +113,7 @@ export class TighCache {
     if (idx !== undefined) {
       this.accessOrder.splice(idx, 1);
       for (let i = idx; i < this.accessOrder.length; i++) {
-        this.accessIndex.set(this.accessOrder[i], i);
+        this.accessIndex.set(this.accessOrder[i]!, i);
       }
       this.accessIndex.delete(key);
     }
@@ -153,7 +160,7 @@ export class TighCache {
   }
 
   invalidatePattern(pattern: string): number {
-    const regex = new RegExp(pattern.replace(/\*/g, '.*'));
+    const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
     let count = 0;
     for (const key of [...this.store.keys()]) {
       if (regex.test(key)) {

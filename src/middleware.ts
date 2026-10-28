@@ -1,4 +1,9 @@
-import type { MiddlewareFn, Request, Response, NextFn } from './types';
+import type {
+  LegacyMiddlewareFn as MiddlewareFn,
+  Request,
+  Response,
+  LegacyNextFn as NextFn,
+} from './types';
 
 export class TighMiddleware {
   private middlewares: MiddlewareFn[] = [];
@@ -25,7 +30,9 @@ export class TighMiddleware {
     const next: NextFn = async (): Promise<Response> => {
       if (index < middlewares.length) {
         const middleware = middlewares[index++];
-        return middleware(req, next);
+        if (middleware) {
+          return middleware(req, next);
+        }
       }
       return finalHandler();
     };
@@ -50,7 +57,7 @@ export function corsMiddleware(config: {
 }): MiddlewareFn {
   return async (req: Request, next: NextFn) => {
     if (req.method === 'OPTIONS') {
-      const origin = Array.isArray(config.origin) ? config.origin[0] : config.origin;
+      const origin = Array.isArray(config.origin) ? config.origin[0] || '*' : config.origin;
       const corsHeaders: Record<string, string> = {
         'Access-Control-Allow-Origin': origin,
         'Access-Control-Allow-Methods': config.methods.join(', '),
@@ -65,7 +72,7 @@ export function corsMiddleware(config: {
     }
 
     const response = await next();
-    const origin = Array.isArray(config.origin) ? config.origin[0] : config.origin;
+    const origin = Array.isArray(config.origin) ? config.origin[0] || '*' : config.origin;
 
     return {
       ...response,
@@ -101,9 +108,10 @@ export function compressMiddleware(): MiddlewareFn {
     const response = await next();
     const acceptEncoding = req.headers['accept-encoding'] || '';
 
-    if (typeof response.body === 'string' && response.body.length > 1024) {
+    const body = response.body;
+    if (typeof body === 'string' && body.length > 1024) {
       if (acceptEncoding.includes('gzip')) {
-        const compressed = await compressGzip(response.body);
+        const compressed = await compressGzip(body);
         return {
           ...response,
           headers: {
@@ -140,7 +148,7 @@ async function compressGzip(data: string): Promise<Uint8Array> {
       chunks.push(value);
     }
 
-    const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+    const totalLength = chunks.reduce((acc: number, chunk: Uint8Array) => acc + chunk.length, 0);
     const result = new Uint8Array(totalLength);
     let offset = 0;
     for (const chunk of chunks) {

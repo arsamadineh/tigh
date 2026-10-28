@@ -1,4 +1,7 @@
-import type { RateLimitConfig, RateLimitResult, Request } from './types';
+import type { RateLimitConfig, RateLimitResult, Request, TighRequest } from './types';
+import { TighGcraRateLimiter } from './rate-limiter/gcra';
+
+export { TighGcraRateLimiter };
 
 interface TokenBucket {
   tokens: number;
@@ -15,23 +18,45 @@ const DEFAULT_CONFIG: RateLimitConfig = {
   strategy: 'token-bucket',
 };
 
+/**
+ * TighRateLimiter: Multi-strategy rate limiter.
+ * Supports token-bucket, sliding-window, fixed-window, and GCRA.
+ */
 export class TighRateLimiter {
   private config: RateLimitConfig;
   private buckets: Map<string, TokenBucket> = new Map();
   private windows: Map<string, SlidingWindow> = new Map();
-  private stats = { totalRequests: 0, rejected: 0, byKey: new Map<string, { allowed: number; rejected: number }>() };
+  private gcraLimiter?: TighGcraRateLimiter;
+  private stats = {
+    totalRequests: 0,
+    rejected: 0,
+    byKey: new Map<string, { allowed: number; rejected: number }>(),
+  };
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: Partial<RateLimitConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.cleanupTimer = setInterval(() => this.cleanup(), this.config.windowMs * 2);
+    if (this.config.strategy === 'gcra') {
+      this.gcraLimiter = new TighGcraRateLimiter(this.config);
+    }
+    if (this.config.windowMs > 0) {
+      this.cleanupTimer = setInterval(() => this.cleanup(), this.config.windowMs * 2);
+    }
   }
 
-  private getKey(req: Request): string {
+  private getKey(req: Request | TighRequest): string {
     if (this.config.keyGenerator) {
-      return this.config.keyGenerator(req);
+      return this.config.keyGenerator(req as TighRequest);
     }
-    return req.ip || req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || 'anonymous';
+    const xff = req.headers['x-forwarded-for'];
+    const clientIp = xff ? xff.split(',')[0]?.trim() : undefined;
+    return (
+      clientIp ||
+      req.headers['cf-connecting-ip'] ||
+      req.headers['x-real-ip'] ||
+      req.ip ||
+      'anonymous'
+    );
   }
 
   private refillBucket(bucket: TokenBucket): void {
@@ -62,13 +87,15 @@ export class TighRateLimiter {
       };
     }
 
-    const retryAfter = Math.ceil((1 - bucket.tokens) / (this.config.maxRequests / this.config.windowMs));
+    const retryAfter = Math.ceil(
+      (1 - bucket.tokens) / (this.config.maxRequests / this.config.windowMs) / 1000
+    );
     return {
       allowed: false,
       remaining: 0,
       resetAt: bucket.lastRefill + this.config.windowMs,
       limit: this.config.maxRequests,
-      retryAfter,
+      retryAfter: Math.max(1, retryAfter),
     };
   }
 
@@ -88,12 +115,12 @@ export class TighRateLimiter {
       return {
         allowed: true,
         remaining: this.config.maxRequests - window.timestamps.length,
-        resetAt: window.timestamps[0] + this.config.windowMs,
+        resetAt: (window.timestamps[0] || now) + this.config.windowMs,
         limit: this.config.maxRequests,
       };
     }
 
-    const oldestInWindow = window.timestamps[0];
+    const oldestInWindow = window.timestamps[0] || now;
     const retryAfter = Math.ceil((oldestInWindow + this.config.windowMs - now) / 1000);
     return {
       allowed: false,
@@ -104,50 +131,27 @@ export class TighRateLimiter {
     };
   }
 
-  private checkFixedWindow(key: string): RateLimitResult {
-    const now = Date.now();
-    const windowStart = Math.floor(now / this.config.windowMs) * this.config.windowMs;
-    const windowKey = `${key}:${windowStart}`;
-
-    const count = this.buckets.get(windowKey)?.tokens ?? this.config.maxRequests;
-
-    if (count > 0) {
-      this.buckets.set(windowKey, { tokens: count - 1, lastRefill: now });
-      return {
-        allowed: true,
-        remaining: count - 1,
-        resetAt: windowStart + this.config.windowMs,
-        limit: this.config.maxRequests,
-      };
+  check(req: Request | TighRequest): RateLimitResult {
+    if (this.gcraLimiter) {
+      return this.gcraLimiter.check(req as TighRequest);
     }
 
-    return {
-      allowed: false,
-      remaining: 0,
-      resetAt: windowStart + this.config.windowMs,
-      limit: this.config.maxRequests,
-      retryAfter: Math.ceil((windowStart + this.config.windowMs - now) / 1000),
-    };
-  }
-
-  check(req: Request): RateLimitResult {
     this.stats.totalRequests++;
     const key = this.getKey(req);
 
     let result: RateLimitResult;
     switch (this.config.strategy) {
-      case 'token-bucket':
-        result = this.checkTokenBucket(key);
-        break;
       case 'sliding-window':
         result = this.checkSlidingWindow(key);
         break;
       case 'fixed-window':
-        result = this.checkFixedWindow(key);
+      case 'token-bucket':
+      default:
+        result = this.checkTokenBucket(key);
         break;
     }
 
-    const keyStats = this.stats.byKey.get(key) || { allowed: 0, rejected: 0 };
+    const keyStats = this.stats.byKey.get(key) ?? { allowed: 0, rejected: 0 };
     if (result.allowed) {
       keyStats.allowed++;
     } else {
@@ -159,25 +163,31 @@ export class TighRateLimiter {
     return result;
   }
 
-  private cleanup(): void {
-    const now = Date.now();
-    for (const [key, bucket] of this.buckets) {
-      if (now - bucket.lastRefill > this.config.windowMs * 3) {
-        this.buckets.delete(key);
-      }
+  headers(result: RateLimitResult): Record<string, string> {
+    if (this.gcraLimiter) {
+      return this.gcraLimiter.headers(result);
     }
-    for (const [key, window] of this.windows) {
-      window.timestamps = window.timestamps.filter((ts) => ts > now - this.config.windowMs);
-      if (window.timestamps.length === 0) {
-        this.windows.delete(key);
-      }
-    }
+    const windowSec = Math.ceil((this.config.windowMs || 60000) / 1000);
+    const retryAfter = result.retryAfter ?? Math.max(1, Math.ceil((result.resetAt - Date.now()) / 1000));
+    return {
+      'RateLimit': `limit=${result.limit}; remaining=${result.remaining}; reset=${Math.floor(
+        result.resetAt / 1000
+      )}`,
+      'RateLimit-Policy': `${result.limit};w=${windowSec}`,
+      'Retry-After': String(retryAfter),
+      'X-RateLimit-Limit': String(result.limit),
+      'X-RateLimit-Remaining': String(result.remaining),
+      'X-RateLimit-Reset': String(Math.floor(result.resetAt / 1000)),
+    };
   }
 
   getStats() {
+    if (this.gcraLimiter) {
+      return this.gcraLimiter.getStats();
+    }
     const byKey: Record<string, { allowed: number; rejected: number }> = {};
-    for (const [key, val] of this.stats.byKey) {
-      byKey[key] = { ...val };
+    for (const [k, v] of this.stats.byKey) {
+      byKey[k] = { ...v };
     }
     return {
       totalRequests: this.stats.totalRequests,
@@ -186,10 +196,27 @@ export class TighRateLimiter {
     };
   }
 
+  private cleanup(): void {
+    const now = Date.now();
+    for (const [key, bucket] of this.buckets) {
+      if (now - bucket.lastRefill > this.config.windowMs * 2) {
+        this.buckets.delete(key);
+      }
+    }
+    for (const [key, window] of this.windows) {
+      if (window.timestamps.length === 0 || now - window.timestamps[window.timestamps.length - 1]! > this.config.windowMs * 2) {
+        this.windows.delete(key);
+      }
+    }
+  }
+
   destroy(): void {
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
+    }
+    if (this.gcraLimiter) {
+      this.gcraLimiter.destroy();
     }
     this.buckets.clear();
     this.windows.clear();
